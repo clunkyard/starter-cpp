@@ -48,6 +48,12 @@
 class Starter : public clunkyard::Robot {
   bool free_flight=false;
   double steer(double towards,double current) { return angles.clamp(angles.angle_diff(towards,current)/45); }
+  // The calibration kernel is xorshift-sqrt v1.
+  static double calibration_work(std::uint64_t work,std::uint64_t tick) {
+    std::uint64_t x=UINT64_C(88172645463325252)^tick;double sum=0;
+    for(std::uint64_t i=0;i<work;i++){x^=x<<13;x^=x>>7;x^=x<<17;sum+=std::sqrt(static_cast<double>(x>>11));}
+    return static_cast<double>((static_cast<std::uint64_t>(std::floor(sum))+(x>>40))%1000000);
+  }
   void on_start() override { free_flight=match.is_3d()&&arena.gravity().z==0; }
   void on_turn() override {
     const auto position=me.position();const auto heading=me.heading(),pitch=me.pitch();
@@ -84,6 +90,8 @@ class Starter : public clunkyard::Robot {
       const auto bearing=angles.bearing_to(position,zone->center),climb=zone->shape==CY_SHAPE_SPHERE?angles.elevation_to(position,zone->center):0;
       drive.set(0.8,angles.clamp(angles.angle_diff(bearing,heading)/30),angles.clamp((climb-pitch)/30));
     }
+    // Only the arena's rate calibration sends this; safe to delete.
+    if(const auto work=raw.number("state.calibration.work");work&&*work>=1)status.set("WORK",calibration_work(static_cast<std::uint64_t>(*work),static_cast<std::uint64_t>(clock.tick())));
   }
 };
 int main() { Starter robot;robot.run(); }
