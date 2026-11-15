@@ -7,7 +7,8 @@
 // clock: tick seconds remaining_ticks
 // arena: size gravity terrain_kind ground_height(x y)
 // me: health position velocity heading pitch roll angular_velocity
-//   attitude grounded altitude applied
+//   attitude grounded altitude applied hull_mounts to_mount(heading pitch)
+//   from_mount(heading pitch) mount_toward(point)
 // battery: charge capacity regen sustainable_drive compute
 //   drive_cost(fraction)
 // drive: hover_lift
@@ -29,7 +30,8 @@
 // score: me best armour
 // angles: normalize(degrees) angle_diff(target current)
 //   bearing_to(from to) elevation_to(from to) direction(heading pitch)
-//   distance(a b) clamp(value low high)
+//   distance(a b) to_chassis(heading pitch attitude)
+//   from_chassis(heading pitch attitude) clamp(value low high)
 // raw: number(path) text(path) has(path) flag(path) count(path) line()
 // Controls: drive.set(throttle turn pitch_turn)
 //   drive.forces(thrust strafe lift yaw_torque pitch_torque roll_torque brake)
@@ -46,7 +48,7 @@
 #include <cstdint>
 
 class Starter : public clunkyard::Robot {
-  bool free_flight=false;
+  bool free_flight=false;int dodge_ticks=0,dodges=0;
   double steer(double towards,double current) { return angles.clamp(angles.angle_diff(towards,current)/45); }
   void on_start() override { free_flight=match.is_3d()&&arena.gravity().z==0; }
   void on_turn() override {
@@ -57,6 +59,7 @@ class Starter : public clunkyard::Robot {
       const auto throttle=target->range>350?0.7:target->range<200?-0.4:0.2;
       drive.set(throttle,steer(target->bearing,heading),steer(target->elevation,pitch));
       scanner.set(target->bearing,20,target->elevation);
+      // gun.lead is the intercept if the target holds course.
       const auto power=gun.power_for_flight_time(target->range,1);const auto aim=gun.lead(*target,power);
       const auto towards=aim?aim->heading:target->bearing,up=aim?aim->pitch:target->elevation;
       gun.aim(towards,up);const auto now=gun.aim_now();
@@ -74,6 +77,16 @@ class Starter : public clunkyard::Robot {
       drive.set(0.5,0.33,steer(0,pitch));
       scanner.set(angles.normalize(scanner.last().heading+36),40,free_flight?((clock.tick()/10)%3-1)*35:0);
       status.set("SEARCH");
+    }
+    // A simple dodge: vary it, or predict the shooter.
+    bool fired=false;for(const auto &heard:sensors.cues())fired|=heard.source==CY_SOURCE_MUZZLE;
+    if(dodge_ticks==0&&fired){dodges++;dodge_ticks=10;}
+    if(dodge_ticks>0) {
+      // Odd dodges go left, even ones right; turn +1 and strafe -1 go left.
+      const bool left=dodges%2==1;dodge_ticks--;
+      if(match.control()==CY_CONTROL_FORCES){drive.set(0.5);drive.forces({},left?-1:1);}
+      else drive.set(1,left?1:-1);
+      status.set(left?"dodge:left":"dodge:right",dodges);
     }
     if(battery.charge()<battery.capacity()/4)drive.set(drive.get_throttle().value_or(0)*0.5);
     if(const auto storm=nav.storm();storm&&storm->margin(position).value_or(-INFINITY)>-60) {
